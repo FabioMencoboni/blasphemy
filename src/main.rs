@@ -178,14 +178,17 @@ impl NeuralNet {
             match layer {
                 Layer::Softmax{} => (),
                 Layer::Sigmoid{bias, weights, input,activation, accumulated_err} => {
-                    accumulated_err.mul_scalar(-0.05f64);
+                    *accumulated_err = accumulated_err.mul_scalar(-0.05f64);
+                    println!("er,{}", accumulated_err);
                     weights.iadd(accumulated_err);
-                    weights.mul_scalar(0f64);
+                    *accumulated_err = accumulated_err.mul_scalar(0f64);
+                    println!("WT,{}", weights);
                 }
                 Layer::Linear{bias, weights, input, activation,accumulated_err} => {
-                    accumulated_err.mul_scalar(-0.05f64);
+                    *accumulated_err = accumulated_err.mul_scalar(-0.05f64);
                     weights.iadd(accumulated_err);
-                    weights.mul_scalar(0f64);
+                    *accumulated_err = accumulated_err.mul_scalar(0f64);
+                    
                 }
                 Layer::Dropout{reject} => ()
             }
@@ -198,16 +201,15 @@ impl NeuralNet {
 
 fn main() {
 
-    let mut nn = NeuralNet::new(10); 
+    let mut nn = NeuralNet::new(4); 
     //nn.linear(20);
-    nn.sigmoid(12);
     nn.sigmoid(5);
-    nn.sigmoid(4);
+    nn.sigmoid(3);
     nn.softmax();
 
     for iter in 0..1000{
-        let input = Matrix::<f64>::random::<f64>(1,10);
-        let output = Matrix::<f64>::random::<f64>(1,4);
+        let input = Matrix::from_vec(vec![1f64,0f64,0f64,1f64], 1,4);
+        let output = Matrix::from_vec(vec![1f64,0f64,0f64], 1,3);
         let err = nn.backprop(&input, &output);
         nn.grad_descent();
         println!("iter={} error={}", iter, err);
