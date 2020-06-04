@@ -21,12 +21,14 @@ use rustml::ops_inplace::{FunctionsInPlace,MatrixScalarOpsInPlace,MatrixMatrixOp
 struct Linear {
     bias: Matrix::<f64>,
     weights: Matrix::<f64>,
+    input: Matrix::<f64>,
     activation: Matrix::<f64>,
     accumulated_err: Matrix::<f64>
 }
 struct Sigmoid {
     bias: Matrix::<f64>,
     weights: Matrix::<f64>,
+    input: Matrix::<f64>,
     activation: Matrix::<f64>,
     accumulated_err: Matrix::<f64>
 }
@@ -37,8 +39,8 @@ struct Dropout{
 }
 
 pub enum Layer {
-    Linear{bias: Matrix::<f64>, weights:Matrix::<f64>, activation: Matrix::<f64>, accumulated_err: Matrix::<f64>},
-    Sigmoid{bias: Matrix::<f64>, weights:Matrix::<f64>, activation: Matrix::<f64>, accumulated_err: Matrix::<f64>},
+    Linear{bias: Matrix::<f64>, weights:Matrix::<f64>, input: Matrix::<f64>, activation: Matrix::<f64>, accumulated_err: Matrix::<f64>},
+    Sigmoid{bias: Matrix::<f64>, weights:Matrix::<f64>, input: Matrix::<f64>, activation: Matrix::<f64>, accumulated_err: Matrix::<f64>},
     Dropout{reject:f64},
     Softmax
 }
@@ -52,9 +54,9 @@ pub struct NeuralNet {
 
 fn g_prime(activation: &Matrix::<f64>) -> Matrix::<f64>{
     // the derivative of the activation is a*(1-a)
-    let act_deriv = activation.clone();
-    act_deriv.mul_scalar(-1f64).add_scalar(1f64).imule(activation);
-    act_deriv 
+    let inp_deriv = activation.clone(); // d/dx of the activation functions
+    inp_deriv.mul_scalar(-1f64).add_scalar(1f64).imule(activation);
+    inp_deriv 
 }
 impl NeuralNet {
 
@@ -70,8 +72,9 @@ impl NeuralNet {
         let next_layer: Layer = Layer::Linear{
             bias: Matrix::<f64>::random::<f64>(1, dim),
             weights: weights,
+            input: Matrix::<f64>::fill(0f64, 1, self.dim_output), // the input from the preceeding layer
             activation: Matrix::<f64>::fill(0f64, 1, dim),
-            accumulated_err:  Matrix::<f64>::fill(0f64, 1, dim)
+            accumulated_err:  Matrix::<f64>::fill(0f64, self.dim_output, dim)
         };
         self.layers.push(next_layer);
         self.dim_output = dim;
@@ -83,8 +86,9 @@ impl NeuralNet {
         let next_layer: Layer = Layer::Sigmoid{
             bias: Matrix::<f64>::random::<f64>(1, dim),
             weights: weights,
+            input: Matrix::<f64>::fill(0f64, 1, self.dim_output), // the input from the preceeding layer
             activation: Matrix::<f64>::fill(0f64, 1, dim),
-            accumulated_err:  Matrix::<f64>::fill(0f64, 1, dim)
+            accumulated_err:  Matrix::<f64>::fill(0f64, self.dim_output, dim)
         };
         self.layers.push(next_layer);
         self.dim_output = dim;
@@ -101,12 +105,14 @@ impl NeuralNet {
         let mut x = input.clone();
         for layer in self.layers.iter_mut(){
             match layer {
-                Layer::Linear{bias, weights, activation, accumulated_err} => {
+                Layer::Linear{bias, weights, input, activation, accumulated_err} => {
+                    *input = x.clone();
                     x = x.mul(&weights, false, false);
                     x.iadd(&bias);
                     *activation = x.clone();
                 },
-                Layer::Sigmoid{bias, weights, activation, accumulated_err} =>{
+                Layer::Sigmoid{bias, weights, input,activation, accumulated_err} =>{
+                    *input = x.clone();
                     x = x.mul(&weights, false, false);
                     x.iadd(&bias);
                     x.isigmoid();
@@ -136,23 +142,29 @@ impl NeuralNet {
         error.isub(output);
         let mut sum_error = 0f64;
         for ei in error.iter(){
-            sum_error = sum_error + ei;
+            sum_error = sum_error + (ei*ei);
         }
         for layer in self.layers.iter_mut().rev(){
             match layer {
                 Layer::Softmax{} => (),
-                Layer::Sigmoid{bias, weights, activation, accumulated_err} => {
-                    println!("ERR BEFORE SHAPE {}", &error);
-                    error = weights.mul(&error, false, true); // transpose W(l)*error(l+1)
-                    let act_deriv = g_prime(&activation);
-                    println!("ERR AFTER SHAPE {}", &error);
-                    println!("act_deriv SHAPE {}", &act_deriv);
-                    error.imule(&act_deriv);
+                Layer::Sigmoid{bias, weights, input,activation, accumulated_err} => {
+                    //println!("Shp Error Inbound: {}", &error);
+                    //println!("Shp Activation: {}", &activation);
+                    let delta_error = input.mul(&error, true, false);
+                    //println!("Shp DeltaError: {}", &delta_error);
+                    accumulated_err.iadd(&delta_error);
+                    // calculate the error for the previous layer
+                    error = error.mul(&weights, false, true); // transpose W(l)*error(l+1)
+                    let inp_deriv = g_prime(&input);
+                    error.imule(&inp_deriv);
                 }
-                Layer::Linear{bias, weights, activation, accumulated_err} => {
-                    error = weights.mul(&error, false, true); // transpose W(l)*error(l+1)
-                    let act_deriv = g_prime(&activation);
-                    error.imule(&act_deriv);
+                Layer::Linear{bias, weights, input, activation,accumulated_err} => {
+                    let delta_error = activation.mul(&error, true, false);
+                    accumulated_err.iadd(&delta_error);
+                    // calculate the error for the previous layer
+                    error = error.mul(&weights, false, true); // transpose W(l)*error(l+1)
+                    let inp_deriv = g_prime(&input);
+                    error.imule(&inp_deriv);
                 }
                 Layer::Dropout{reject} => ()
             }
@@ -160,22 +172,47 @@ impl NeuralNet {
         }
         sum_error 
     }
+
+    pub fn grad_descent(&mut self){
+        for layer in self.layers.iter_mut().rev(){
+            match layer {
+                Layer::Softmax{} => (),
+                Layer::Sigmoid{bias, weights, input,activation, accumulated_err} => {
+                    accumulated_err.mul_scalar(-0.05f64);
+                    weights.iadd(accumulated_err);
+                    weights.mul_scalar(0f64);
+                }
+                Layer::Linear{bias, weights, input, activation,accumulated_err} => {
+                    accumulated_err.mul_scalar(-0.05f64);
+                    weights.iadd(accumulated_err);
+                    weights.mul_scalar(0f64);
+                }
+                Layer::Dropout{reject} => ()
+            }
+            
+        }
+
+    }
 }
 
 
 fn main() {
 
     let mut nn = NeuralNet::new(10); 
-    nn.linear(20);
+    //nn.linear(20);
     nn.sigmoid(12);
+    nn.sigmoid(5);
     nn.sigmoid(4);
     nn.softmax();
-    let input = Matrix::<f64>::random::<f64>(1,10);
-    let output = Matrix::<f64>::random::<f64>(1,4);
 
-    let out = nn.forward_prop(&input);
-    let err = nn.backprop(&input, &output);
-    println!("OUTPUT = {}", out);
+    for iter in 0..1000{
+        let input = Matrix::<f64>::random::<f64>(1,10);
+        let output = Matrix::<f64>::random::<f64>(1,4);
+        let err = nn.backprop(&input, &output);
+        nn.grad_descent();
+        println!("iter={} error={}", iter, err);
+    }
+    //println!("OUTPUT = {}", out);
     //println!("INOUT={}", input);
     
 
