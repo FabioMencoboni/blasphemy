@@ -1,8 +1,13 @@
 [package]
 name = "blasphemy"
-version = "0.1.0"
+license = "Apache-2.0"
+version = "0.0.1"
 authors = ["Fabio Mencoboni <Fabio.Mencoboni@gmail.com>"]
 edition = "2018"
+description = "Inspired by Keras, powered by BLAS. Construct neural networks with one line of code per layer. That's BLASphemy."
+readme = "README.md"
+include = [ "Cargo.toml", "README.md", "src/*.rs" ]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
