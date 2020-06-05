@@ -5,6 +5,7 @@
 // https://www.youtube.com/watch?v=ueO_Ph0Pyqk
 // loss for softmax = -log(predict@correct class) = sum (yjlogy^ j)
 // error at output for softmax = <pred> - <actual>
+use std::cmp;
 use rustml::Matrix;
 use rustml::ops::{MatrixMatrixOps,MatrixScalarOps};
 use rustml::ops_inplace::{FunctionsInPlace,MatrixScalarOpsInPlace,MatrixMatrixOpsInPlace};
@@ -62,6 +63,18 @@ fn activation_deriv(a: &Matrix::<f64>) -> Matrix::<f64>{
     g_prime 
 }
 
+pub fn clip(x: &mut Matrix::<f64>, min_val: f64, max_val: f64) {
+    for  xi in x.iter_mut(){
+        //let orig: f64 = xi.clone();
+        //*xi = cmp::min(cmp::max(*xi, -100f64), 100f64);
+        if *xi < min_val{
+            *xi = min_val;
+        }
+        if *xi > max_val{
+            *xi = max_val;
+        }
+    }
+}
 impl NeuralNet {
 
     pub fn new(dim_last: usize) -> NeuralNet {
@@ -72,7 +85,7 @@ impl NeuralNet {
 
     pub fn linear(&mut self, dim: usize) {
         let mut weights = Matrix::<f64>::random::<f64>(self.dim_last, dim);
-        weights.idiv_scalar(100f64);
+        //weights.idiv_scalar(100f64);
         let next_layer: Layer = Layer::Linear{
             inp: Matrix::<f64>::fill(0f64, 1, self.dim_last),
             z: Matrix::<f64>::fill(0f64, 1, dim),
@@ -87,7 +100,7 @@ impl NeuralNet {
 
     pub fn sigmoid(&mut self, dim: usize) {
         let mut weights = Matrix::<f64>::random::<f64>(self.dim_last, dim);
-        weights.idiv_scalar(100f64);
+        //weights.idiv_scalar(10f64);
         let next_layer: Layer = Layer::Sigmoid{
             inp: Matrix::<f64>::fill(0f64, 1, self.dim_last),
             z: Matrix::<f64>::fill(0f64, 1, dim),
@@ -116,6 +129,7 @@ impl NeuralNet {
                     *inp = x.clone();
                     x = x.mul(&weights, false, false);
                     x.iadd(&bias);
+                    //clip(&mut x, 0f64, 100f64);
                     *z = x.clone();
                 },
                 Layer::Sigmoid{inp, z, a, bias, bias_err, weights, weights_err} =>{
@@ -138,6 +152,7 @@ impl NeuralNet {
 
                 }
             }
+            clip(&mut x, -100f64, 100f64);
         }
     // return x after all the transformations
     x
@@ -167,6 +182,7 @@ impl NeuralNet {
                     //println!("weights_delta {}", &weights_delta);
                     weights_err.iadd(&weights_delta);
 
+
                     error = error.mul(&weights, false, true);
                     let g_prime = activation_deriv(&inp);
                     //println!("error {}", &error);
@@ -178,6 +194,17 @@ impl NeuralNet {
                     
                 }
                 Layer::Linear{inp, z,bias,bias_err, weights,weights_err} => {
+                    bias_err.iadd(&error);
+                    let weights_delta = inp.mul(&error, true, false);
+                    //println!("weights_err {}", &weights_err);
+                    //println!("weights_delta {}", &weights_delta);
+                    weights_err.iadd(&weights_delta);
+
+                    error = error.mul(&weights, false, true);
+                    let g_prime = activation_deriv(&inp);
+                    //println!("error {}", &error);
+                    //println!("g_prime {}", &g_prime);
+                    error.imule(&g_prime);
 
                 }
                 Layer::Dropout{reject} => ()
@@ -192,24 +219,37 @@ impl NeuralNet {
             match layer {
                 Layer::Softmax{} => (),
                 Layer::Sigmoid{inp, z, a, bias, bias_err, weights, weights_err} => {
-                    *weights_err = weights_err.mul_scalar(-0.12f64);
+                    *weights_err = weights_err.mul_scalar(-0.05f64);
                     //println!("er,{}", weights_err);
+                    clip(weights_err, -1f64, 1f64);
                     weights.iadd(weights_err);
+                    weights.mul_scalar(0.98f64); // regularization
+                    //println!("sig weights {}", &weights);
                     *weights_err = weights_err.mul_scalar(0f64);
                     //println!("WT,{}", weights);
-                    *bias_err = bias_err.mul_scalar(-0.12f64);
+                    *bias_err = bias_err.mul_scalar(-0.05f64);
+                    clip(bias_err, -0.1f64, 0.1f64);
                     bias.iadd(bias_err);
+                    clip(bias, -100f64, 100f64);
                     //println!("BIAS{}", &bias);
                     *bias_err = bias_err.mul_scalar(0f64);
+                    clip(weights, -100f64, 100f64);
                 }
                 Layer::Linear{inp, z, bias, bias_err, weights,weights_err} => {
-                    *weights_err = weights_err.mul_scalar(-0.12f64);
+                    *weights_err = weights_err.mul_scalar(-0.05f64);
+                    clip(weights_err, -1f64, 1f64);
                     weights.iadd(weights_err);
+                    weights.mul_scalar(0.98f64); // regularization
+                    //println!("{}", &weights);
+                    //println!("linear weights {}", &weights);
                     *weights_err = weights_err.mul_scalar(0f64);
-                    *bias_err = bias_err.mul_scalar(-0.12f64);
+                    *bias_err = bias_err.mul_scalar(-0.05f64);
+                    clip(bias_err, -1f64, 1f64);
                     bias.iadd(bias_err);
+                    clip(bias, -100f64, 100f64);
                     
                     *bias_err = bias_err.mul_scalar(0f64);
+                    clip(weights, -100f64, 100f64);
                     
                 }
                 Layer::Dropout{reject} => ()
@@ -225,15 +265,30 @@ fn main() {
 
     let mut nn = NeuralNet::new(4); 
     //nn.linear(20);
-    nn.sigmoid(5);
-    nn.sigmoid(3);
-    //nn.softmax();
+    //nn.linear(20);
+    nn.linear(5);
+    nn.linear(17);
+    nn.linear(10);
+    //nn.linear(5);
+    //nn.linear(20);
+    nn.linear(3);
+    //nn.linear(21);
+    //nn.linear(20);
+    //nn.sigmoid(5);
+    //nn.sigmoid(3);
+    nn.softmax();
 
-    for iter in 0..10{
+    for iter in 0..2000{
         let input = Matrix::from_vec(vec![1f64,0f64,0f64,1f64], 1,4);
         let output = Matrix::from_vec(vec![1f64,0f64,0f64], 1,3);
         let err = nn.backprop(&input, &output);
-        nn.grad_descent();
+        let input = Matrix::from_vec(vec![0f64,2f64,2f64,0f64], 1,4);
+        let output = Matrix::from_vec(vec![0f64,1f64,0f64], 1,3);
+        let err = nn.backprop(&input, &output);
+        if iter % 3 == 0 {
+            nn.grad_descent();
+        }
+        
         println!("iter={} error={}", iter, err);
     }
     //println!("OUTPUT = {}", out);
