@@ -13,6 +13,10 @@ The safety of Rust. The raw speed of BLAS. An ergonomic interface for neural net
 - [_] ReLU Layers
 - [_]  Residual Layers
 
+#### Updates
+- 0.0.2 Changed random initialization to center around 0.0 - much more stable
+- 0.0.2 fixed bug in backprop for linear layers
+
 ### Quickstart
 
 You will need BLAS to use blasphemy. If you are using Ubuntu/Debian this can be accomplished with
